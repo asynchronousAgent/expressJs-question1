@@ -9,10 +9,10 @@ module.exports = async (req, res, next) => {
         msg: "Provided token is not valid, please provide a valid token",
       });
     else {
-      req.access_token = access_token;
+      req.user_id = access_token;
       next();
     }
   } catch (err) {
-    console.log(err);
+    next(new Error(err));
   }
 };
