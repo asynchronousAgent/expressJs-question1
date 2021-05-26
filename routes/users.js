@@ -18,7 +18,7 @@ router.post("/registration", async (req, res, next) => {
     if (user)
       return res
         .status(400)
-        .json({ success: 0, message: "User already exists", data: [user] });
+        .json({ success: 0, message: "User already exists", data: user });
     if (password !== confirm_password)
       return res.status(400).json({
         success: 0,
@@ -33,15 +33,15 @@ router.post("/registration", async (req, res, next) => {
     });
     const salt = await bcrypt.genSalt(10);
     newUser.password = await bcrypt.hash(password, salt);
-    // newUser.confirm_password = newUser.password;
+    newUser.salt = salt;
     await newUser.save();
     res.status(201).json({
       success: 1,
       message: `${newUser.username} created successfully`,
-      data: [newUser],
+      data: newUser,
     });
   } catch (err) {
-    next(new Error(err));
+    next(err);
   }
 });
 
@@ -55,19 +55,19 @@ router.post("/login", async (req, res, next) => {
         return res.status(200).json({
           success: 1,
           message: "Logged in successfully",
-          data: [{ access_token: user._id }],
+          data: { access_token: user._id },
         });
       }
       res.status(400).json({
         success: 0,
         message: "Login credentials didn't match,Please try again",
-        data: [verifiedUser],
+        data: { verifiedUser },
       });
     } else {
       res.status(500).json({ success: 0, message: "Internal Server error" });
     }
   } catch (err) {
-    next(new Error(err));
+    next(err);
   }
 });
 
@@ -78,10 +78,10 @@ router.get("/get", validationCheck, async (req, res, next) => {
       res.status(200).json({
         success: 1,
         messsage: `${user.username}'s details are successfully returned`,
-        data: [user],
+        data: { user },
       });
   } catch (err) {
-    next(new Error("Server error"));
+    next(err);
   }
 });
 
@@ -92,16 +92,16 @@ router.put("/delete", validationCheck, async (req, res, next) => {
       res.status(200).json({
         success: 1,
         message: `${user.username} has been deleted successfully`,
-        data: [user],
+        data: user,
       });
   } catch (err) {
-    next(new Error("Server error"));
+    next(err);
   }
 });
 
 router.get("/list/:page", async (req, res, next) => {
   const page = parseInt(req.params.page);
-  const skip = page * 10;
+  const skip = (page - 1) * 10;
   try {
     const users = await User.find().limit(10).skip(skip).select("-password");
     if (page > users.length)
@@ -112,7 +112,7 @@ router.get("/list/:page", async (req, res, next) => {
     res.status(200).json({
       success: 1,
       message: `Total no of users in this page ${users.length}`,
-      data: [users],
+      data: { users },
     });
   } catch (err) {
     next(new Error("Please put a positive value of page"));

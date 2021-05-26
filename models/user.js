@@ -27,6 +27,9 @@ const userSchema = new mongoose.Schema({
     maxlength: 255,
     required: true,
   },
+  salt: {
+    type: String,
+  },
 });
 
 const User = mongoose.model("User", userSchema);

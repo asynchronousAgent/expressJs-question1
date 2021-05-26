@@ -13,6 +13,6 @@ module.exports = async (req, res, next) => {
       next();
     }
   } catch (err) {
-    next(new Error(err));
+    next(err);
   }
 };
