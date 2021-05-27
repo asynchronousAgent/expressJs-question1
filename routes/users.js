@@ -1,7 +1,13 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const md5 = require("md5");
+const jwt = require("jsonwebtoken");
+const passport = require("passport");
+require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
+const AccessToken = require("../models/access_token");
+const Address = require("../models/address");
 const router = express.Router();
 
 router.post("/registration", async (req, res, next) => {
@@ -52,16 +58,21 @@ router.post("/login", async (req, res, next) => {
     if (user) {
       const verifiedUser = await bcrypt.compare(password, user.password);
       if (verifiedUser) {
+        const payload = {
+          user: user._id,
+        };
+        const token = jwt.sign(payload, process.env.mySecretKey, {
+          expiresIn: 3600,
+        });
         return res.status(200).json({
           success: 1,
           message: "Logged in successfully",
-          data: { access_token: user._id },
+          data: { user_id: user.id, token: "Bearer " + token },
         });
       }
       res.status(400).json({
         success: 0,
         message: "Login credentials didn't match,Please try again",
-        data: { verifiedUser },
       });
     } else {
       res.status(500).json({ success: 0, message: "Internal Server error" });
@@ -71,33 +82,41 @@ router.post("/login", async (req, res, next) => {
   }
 });
 
-router.get("/get", validationCheck, async (req, res, next) => {
-  try {
-    const user = await User.findById(req.user_id).select("-password");
-    if (user)
-      res.status(200).json({
-        success: 1,
-        messsage: `${user.username}'s details are successfully returned`,
-        data: { user },
-      });
-  } catch (err) {
-    next(err);
+router.get(
+  "/get",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res, next) => {
+    try {
+      const user = await User.findById(req.user).select("-password");
+      if (user)
+        res.status(200).json({
+          success: 1,
+          messsage: `${user.username}'s details are successfully returned`,
+          data: { user },
+        });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-router.put("/delete", validationCheck, async (req, res, next) => {
-  try {
-    const user = await User.findByIdAndDelete(req.user_id);
-    if (user)
-      res.status(200).json({
-        success: 1,
-        message: `${user.username} has been deleted successfully`,
-        data: user,
-      });
-  } catch (err) {
-    next(err);
+router.put(
+  "/delete",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res, next) => {
+    try {
+      const user = await User.findByIdAndDelete(req.user);
+      if (user)
+        res.status(200).json({
+          success: 1,
+          message: `${user.username} has been deleted successfully`,
+          data: user,
+        });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 router.get("/list/:page", async (req, res, next) => {
   const page = parseInt(req.params.page);
@@ -116,6 +135,59 @@ router.get("/list/:page", async (req, res, next) => {
     });
   } catch (err) {
     next(new Error("Please put a positive value of page"));
+  }
+});
+
+router.post(
+  "/address",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res, next) => {
+    const { address, city, state, pinCode, phoneNumber } = req.body;
+    try {
+      const user = await Address.findOne({ user_id: req.user });
+      if (user)
+        return res.status(400).json({
+          success: 0,
+          message: "Your record is already present at our end",
+          data: user,
+        });
+      const userAddress = new Address({
+        user_id: req.user,
+        address: address.split(","),
+        city,
+        state,
+        pinCode,
+        phoneNumber,
+      });
+      await userAddress.save();
+      res.status(201).json({
+        success: 1,
+        message: "Address field has been created successfully",
+        data: userAddress,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get("/get/:userid", async (req, res, next) => {
+  try {
+    const userData = await Address.findOne({
+      user_id: req.params.userid,
+    }).populate("user_id");
+    if (!userData)
+      return res.status(400).json({
+        success: 0,
+        message: "Please provide a valid userid to see your details",
+      });
+    res.status(200).json({
+      success: 1,
+      message: "UserData has been fetched successfully",
+      data: userData,
+    });
+  } catch (err) {
+    next(err);
   }
 });
 
