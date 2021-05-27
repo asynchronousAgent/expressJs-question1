@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const md5 = require("md5");
 const jwt = require("jsonwebtoken");
+const passport = require("passport");
 require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
@@ -81,33 +82,41 @@ router.post("/login", async (req, res, next) => {
   }
 });
 
-router.get("/get", validationCheck, async (req, res, next) => {
-  try {
-    const user = await User.findById(req.user_id).select("-password");
-    if (user)
-      res.status(200).json({
-        success: 1,
-        messsage: `${user.username}'s details are successfully returned`,
-        data: { user },
-      });
-  } catch (err) {
-    next(err);
+router.get(
+  "/get",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res, next) => {
+    try {
+      const user = await User.findById(req.user).select("-password");
+      if (user)
+        res.status(200).json({
+          success: 1,
+          messsage: `${user.username}'s details are successfully returned`,
+          data: { user },
+        });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-router.put("/delete", validationCheck, async (req, res, next) => {
-  try {
-    const user = await User.findByIdAndDelete(req.user_id);
-    if (user)
-      res.status(200).json({
-        success: 1,
-        message: `${user.username} has been deleted successfully`,
-        data: user,
-      });
-  } catch (err) {
-    next(err);
+router.put(
+  "/delete",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res, next) => {
+    try {
+      const user = await User.findByIdAndDelete(req.user);
+      if (user)
+        res.status(200).json({
+          success: 1,
+          message: `${user.username} has been deleted successfully`,
+          data: user,
+        });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 router.get("/list/:page", async (req, res, next) => {
   const page = parseInt(req.params.page);
@@ -129,34 +138,38 @@ router.get("/list/:page", async (req, res, next) => {
   }
 });
 
-router.post("/address", validationCheck, async (req, res, next) => {
-  const { address, city, state, pinCode, phoneNumber } = req.body;
-  try {
-    const user = await Address.findOne({ user_id: req.user_id });
-    if (user)
-      return res.status(400).json({
-        success: 0,
-        message: "Your record is already present at our end",
-        data: user,
+router.post(
+  "/address",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res, next) => {
+    const { address, city, state, pinCode, phoneNumber } = req.body;
+    try {
+      const user = await Address.findOne({ user_id: req.user });
+      if (user)
+        return res.status(400).json({
+          success: 0,
+          message: "Your record is already present at our end",
+          data: user,
+        });
+      const userAddress = new Address({
+        user_id: req.user,
+        address: address.split(","),
+        city,
+        state,
+        pinCode,
+        phoneNumber,
       });
-    const userAddress = new Address({
-      user_id: req.user_id,
-      address: address.split(","),
-      city,
-      state,
-      pinCode,
-      phoneNumber,
-    });
-    await userAddress.save();
-    res.status(201).json({
-      success: 1,
-      message: "Address field has been created successfully",
-      data: userAddress,
-    });
-  } catch (err) {
-    next(err);
+      await userAddress.save();
+      res.status(201).json({
+        success: 1,
+        message: "Address field has been created successfully",
+        data: userAddress,
+      });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 router.get("/get/:userid", async (req, res, next) => {
   try {
