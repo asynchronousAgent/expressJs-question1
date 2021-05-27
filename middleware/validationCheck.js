@@ -6,7 +6,8 @@ module.exports = async (req, res, next) => {
     const valid_user = await User.findById(access_token);
     if (!valid_user)
       return res.status(400).json({
-        msg: "Provided token is not valid, please provide a valid token",
+        status: 0,
+        message: "Provided token is not valid, please provide a valid token",
       });
     else {
       req.user_id = access_token;
