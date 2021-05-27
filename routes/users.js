@@ -1,6 +1,8 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const md5 = require("md5");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
 const AccessToken = require("../models/access_token");
@@ -55,24 +57,21 @@ router.post("/login", async (req, res, next) => {
     if (user) {
       const verifiedUser = await bcrypt.compare(password, user.password);
       if (verifiedUser) {
-        const token = md5(Date.now() + user.username);
-        const expiry = Date.now() + 1000 * 60 * 60;
-        const access_token = new AccessToken({
-          user_id: user._id,
-          access_token: token,
-          expiry,
+        const payload = {
+          user: user._id,
+        };
+        const token = jwt.sign(payload, process.env.mySecretKey, {
+          expiresIn: 3600,
         });
-        await access_token.save();
         return res.status(200).json({
           success: 1,
           message: "Logged in successfully",
-          data: { access_token },
+          data: { user_id: user.id, token: "Bearer " + token },
         });
       }
       res.status(400).json({
         success: 0,
         message: "Login credentials didn't match,Please try again",
-        data: { verifiedUser },
       });
     } else {
       res.status(500).json({ success: 0, message: "Internal Server error" });
