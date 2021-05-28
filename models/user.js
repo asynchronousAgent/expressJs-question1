@@ -30,6 +30,10 @@ const userSchema = new mongoose.Schema({
   salt: {
     type: String,
   },
+  address: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Address",
+  },
 });
 
 const User = mongoose.model("User", userSchema);
