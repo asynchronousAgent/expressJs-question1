@@ -17,10 +17,6 @@ module.exports = async (req, res, next) => {
         message: "Session has expired,please login again",
       });
     }
-    // if (!valid_user)
-    //   return res.status(400).json({
-    //     msg: "Provided token is not valid, please provide a valid token",
-    //   });
     req.user_id = valid_token.user_id;
     next();
   } catch (err) {
