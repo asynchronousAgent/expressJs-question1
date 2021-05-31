@@ -1,7 +1,10 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const md5 = require("md5");
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
+const AccessToken = require("../models/access_token");
+const Address = require("../models/address");
 const router = express.Router();
 
 router.post("/registration", async (req, res, next) => {
@@ -52,10 +55,35 @@ router.post("/login", async (req, res, next) => {
     if (user) {
       const verifiedUser = await bcrypt.compare(password, user.password);
       if (verifiedUser) {
+        let exist_user = await AccessToken.findOne({ user_id: user._id });
+        if (exist_user) {
+          const newToken = md5(Date.now() + user.username);
+          const newExpiry = Date.now() + 1000 * 60 * 60;
+          exist_user = await AccessToken.findOneAndUpdate(
+            { user_id: user._id },
+            {
+              $set: { access_token: newToken, expiry: newExpiry },
+            },
+            { new: true }
+          );
+          return res.status(200).json({
+            success: 1,
+            message: "Logged in successfully",
+            data: { exist_user },
+          });
+        }
+        const token = md5(Date.now() + user.username);
+        const expiry = Date.now() + 1000 * 60 * 60;
+        const access_token = new AccessToken({
+          user_id: user._id,
+          access_token: token,
+          expiry,
+        });
+        await access_token.save();
         return res.status(200).json({
           success: 1,
           message: "Logged in successfully",
-          data: { access_token: user._id },
+          data: { access_token },
         });
       }
       res.status(400).json({
@@ -116,6 +144,49 @@ router.get("/list/:page", async (req, res, next) => {
     });
   } catch (err) {
     next(new Error("Please put a positive value of page"));
+  }
+});
+
+router.post("/address", validationCheck, async (req, res, next) => {
+  const { address, city, state, pinCode, phoneNumber } = req.body;
+  try {
+    const userAddress = new Address({
+      user_id: req.user_id,
+      address,
+      city,
+      state,
+      pinCode,
+      phoneNumber,
+    });
+    await userAddress.save();
+    await User.findByIdAndUpdate(req.user_id, {
+      $push: { address: userAddress.id },
+    });
+    res.status(201).json({
+      success: 1,
+      message: "Address field has been created successfully",
+      data: userAddress,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/get/:userid", async (req, res, next) => {
+  try {
+    const userData = await User.findById(req.params.userid).populate("address");
+    if (!userData)
+      return res.status(400).json({
+        success: 0,
+        message: "Please provide a valid userid to see your details",
+      });
+    res.status(200).json({
+      success: 1,
+      message: "UserData has been fetched successfully",
+      data: userData,
+    });
+  } catch (err) {
+    next(err);
   }
 });
 
