@@ -150,22 +150,9 @@ router.get("/list/:page", async (req, res, next) => {
 router.post("/address", validationCheck, async (req, res, next) => {
   const { address, city, state, pinCode, phoneNumber } = req.body;
   try {
-    let user = await Address.findOne({ user_id: req.user_id });
-    if (user) {
-      user = await Address.findOneAndUpdate(
-        { user_id: req.user_id },
-        { $push: { address } },
-        { new: true }
-      );
-      return res.status(400).json({
-        success: 1,
-        message: "Your address has been added successfully",
-        data: user,
-      });
-    }
     const userAddress = new Address({
       user_id: req.user_id,
-      address: address.split(","),
+      address,
       city,
       state,
       pinCode,
@@ -173,7 +160,7 @@ router.post("/address", validationCheck, async (req, res, next) => {
     });
     await userAddress.save();
     await User.findByIdAndUpdate(req.user_id, {
-      $set: { address: userAddress.id },
+      $push: { address: userAddress.id },
     });
     res.status(201).json({
       success: 1,
