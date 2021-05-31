@@ -57,37 +57,11 @@ router.post("/login", async (req, res, next) => {
     if (user) {
       const verifiedUser = await bcrypt.compare(password, user.password);
       if (verifiedUser) {
-<<<<<<< HEAD
         const payload = {
           user: user._id,
         };
         const token = jwt.sign(payload, process.env.mySecretKey, {
           expiresIn: 3600,
-=======
-        let exist_user = await AccessToken.findOne({ user_id: user._id });
-        if (exist_user) {
-          const newToken = md5(Date.now() + user.username);
-          const newExpiry = Date.now() + 1000 * 60 * 60;
-          exist_user = await AccessToken.findOneAndUpdate(
-            { user_id: user._id },
-            {
-              $set: { access_token: newToken, expiry: newExpiry },
-            },
-            { new: true }
-          );
-          return res.status(200).json({
-            success: 1,
-            message: "Logged in successfully",
-            data: { exist_user },
-          });
-        }
-        const token = md5(Date.now() + user.username);
-        const expiry = Date.now() + 1000 * 60 * 60;
-        const access_token = new AccessToken({
-          user_id: user._id,
-          access_token: token,
-          expiry,
->>>>>>> 0fa7de15045e2b35550e4c4026e1e1d8268fa179
         });
         return res.status(200).json({
           success: 1,
