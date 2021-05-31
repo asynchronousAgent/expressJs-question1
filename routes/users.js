@@ -57,11 +57,37 @@ router.post("/login", async (req, res, next) => {
     if (user) {
       const verifiedUser = await bcrypt.compare(password, user.password);
       if (verifiedUser) {
+<<<<<<< HEAD
         const payload = {
           user: user._id,
         };
         const token = jwt.sign(payload, process.env.mySecretKey, {
           expiresIn: 3600,
+=======
+        let exist_user = await AccessToken.findOne({ user_id: user._id });
+        if (exist_user) {
+          const newToken = md5(Date.now() + user.username);
+          const newExpiry = Date.now() + 1000 * 60 * 60;
+          exist_user = await AccessToken.findOneAndUpdate(
+            { user_id: user._id },
+            {
+              $set: { access_token: newToken, expiry: newExpiry },
+            },
+            { new: true }
+          );
+          return res.status(200).json({
+            success: 1,
+            message: "Logged in successfully",
+            data: { exist_user },
+          });
+        }
+        const token = md5(Date.now() + user.username);
+        const expiry = Date.now() + 1000 * 60 * 60;
+        const access_token = new AccessToken({
+          user_id: user._id,
+          access_token: token,
+          expiry,
+>>>>>>> 0fa7de15045e2b35550e4c4026e1e1d8268fa179
         });
         return res.status(200).json({
           success: 1,
@@ -132,22 +158,18 @@ router.get("/list/:page", async (req, res, next) => {
 router.post("/address", validationCheck, async (req, res, next) => {
   const { address, city, state, pinCode, phoneNumber } = req.body;
   try {
-    const user = await Address.findOne({ user_id: req.user_id });
-    if (user)
-      return res.status(400).json({
-        success: 0,
-        message: "Your record is already present at our end",
-        data: user,
-      });
     const userAddress = new Address({
       user_id: req.user_id,
-      address: address.split(","),
+      address,
       city,
       state,
       pinCode,
       phoneNumber,
     });
     await userAddress.save();
+    await User.findByIdAndUpdate(req.user_id, {
+      $push: { address: userAddress.id },
+    });
     res.status(201).json({
       success: 1,
       message: "Address field has been created successfully",
@@ -160,9 +182,7 @@ router.post("/address", validationCheck, async (req, res, next) => {
 
 router.get("/get/:userid", async (req, res, next) => {
   try {
-    const userData = await Address.findOne({
-      user_id: req.params.userid,
-    }).populate("user_id");
+    const userData = await User.findById(req.params.userid).populate("address");
     if (!userData)
       return res.status(400).json({
         success: 0,
