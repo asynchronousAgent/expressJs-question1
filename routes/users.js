@@ -2,12 +2,52 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const md5 = require("md5");
 const jwt = require("jsonwebtoken");
+const multer = require("multer");
+const imgur = require("imgur");
+const sgMail = require("@sendgrid/mail");
+const nodemailer = require("nodemailer");
 require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
 const AccessToken = require("../models/access_token");
 const Address = require("../models/address");
 const router = express.Router();
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "./uploads/");
+  },
+  filename: function (req, file, cb) {
+    cb(
+      null,
+      new Date().toISOString().replace(/:/g, "-") + "_" + file.originalname
+    );
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype === "image/jpeg" || file.mimetype === "image/png") {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid mimetype"), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 1024 * 1024 * 3,
+  },
+  fileFilter: fileFilter,
+});
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.host_email,
+    pass: process.env.host_password,
+  },
+});
 
 router.post("/registration", async (req, res, next) => {
   const {
@@ -18,6 +58,12 @@ router.post("/registration", async (req, res, next) => {
     password,
     confirm_password,
   } = req.body;
+  const mailOptions = {
+    from: process.env.host_email,
+    to: email_id,
+    subject: "Registration",
+    text: `Hi ${username}, your registration succeeded`,
+  };
   try {
     const user = await User.findOne({ username, email_id });
     if (user)
@@ -40,6 +86,7 @@ router.post("/registration", async (req, res, next) => {
     newUser.password = await bcrypt.hash(password, salt);
     newUser.salt = salt;
     await newUser.save();
+    await transporter.sendMail(mailOptions);
     res.status(201).json({
       success: 1,
       message: `${newUser.username} created successfully`,
@@ -153,6 +200,133 @@ router.post("/address", validationCheck, async (req, res, next) => {
     next(err);
   }
 });
+
+router.delete("/address", validationCheck, async (req, res) => {
+  let { address_id } = req.body;
+  address_id = address_id.split(",");
+  try {
+    const address = await Address.deleteMany({ _id: { $in: address_id } });
+    if (!address)
+      return res.status(404).json({
+        success: 0,
+        message:
+          "provided address_id is not valid, please provide a valid address_id",
+      });
+    const user = await User.findByIdAndUpdate(
+      req.user_id,
+      { $pull: { address: { $in: address_id } } },
+      { new: true }
+    );
+    res.status(200).json({
+      success: 1,
+      message: "requested address has been deleted successfully",
+      data: user,
+    });
+  } catch (err) {
+    throw err;
+  }
+});
+
+router.post("/forgot-password", async (req, res) => {
+  const { username } = req.body;
+  try {
+    const user = await User.findOne({ username });
+    if (!user)
+      return res.status(400).json({
+        success: 0,
+        message: "Please give proper username",
+      });
+    const payload = {
+      user: username,
+      email: user.email_id,
+    };
+    const token = jwt.sign(payload, process.env.mySecretKey, {
+      expiresIn: 600,
+    });
+    const mailOptions = {
+      from: process.env.host_email,
+      to: user.email_id,
+      subject: "Reset password",
+      text: `Hi ${username}, your request to reset password has been processed. Please open the following link to reset your password, please noted this link is valid only for 10 minutes. Link-> ${process.env.reset_link}/${token}`,
+    };
+    await transporter.sendMail(mailOptions);
+    res.status(200).json({
+      success: 1,
+      message: "Token for reset password has been generated successfully",
+      data: token,
+    });
+  } catch (err) {
+    throw err;
+  }
+});
+
+router.post(
+  "/verify-reset-password/:password_reset_token",
+  async (req, res) => {
+    const token = req.params.password_reset_token;
+    let { password, confirm_password } = req.body;
+    try {
+      const decoded = jwt.verify(token, process.env.mySecretKey);
+      if (password !== confirm_password)
+        return res.status(400).json({
+          success: 0,
+          message: "password did not match, please re-enter correctly",
+        });
+      const salt = await bcrypt.genSalt(10);
+      password = await bcrypt.hash(password, salt);
+      const reset_successful = await User.findOneAndUpdate(
+        { username: decoded.user },
+        { $set: { password, salt } },
+        { new: true }
+      ).select("-password -salt");
+      const mailOptions = {
+        from: process.env.host_email,
+        to: decoded.email,
+        subject: "Password Changed",
+        text: `Hi ${decoded.user}, your Password has been Changed successfully`,
+      };
+      await transporter.sendMail(mailOptions);
+      res.status(200).json({
+        success: 1,
+        message: "Password changed successfully",
+        data: reset_successful,
+      });
+    } catch (err) {
+      res.status(400).json({ success: 0, message: "Token expired" });
+    }
+  }
+);
+
+router.post(
+  "/profile-image",
+  validationCheck,
+  upload.single("profile_img"),
+  async (req, res) => {
+    const profile_img = req.file.path;
+    try {
+      // Implementation 1.upload in folder
+      await User.findByIdAndUpdate(
+        req.user_id,
+        { $set: { profile_img } },
+        { new: true }
+      );
+      // Implementation 2.upload in online storage
+      const url = await imgur.uploadFile(`./${profile_img}`);
+      const user = await User.findByIdAndUpdate(
+        req.user_id,
+        { $set: { profile_img_online_storage: url.link } },
+        { new: true }
+      ).select("-password -salt");
+      res.status(200).json({
+        success: 1,
+        message: "Profile photo updated successfully",
+        data: user,
+      });
+    } catch (err) {
+      throw err;
+    }
+  }
+);
 
 router.get("/get/:userid", async (req, res, next) => {
   try {
