@@ -1,16 +1,15 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const md5 = require("md5");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const imgur = require("imgur");
-const sgMail = require("@sendgrid/mail");
-const nodemailer = require("nodemailer");
 require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
 const AccessToken = require("../models/access_token");
 const Address = require("../models/address");
+const transporter = require("../util/mailTransporter");
+const ResetPassword = require("../models/resetPassword");
 const router = express.Router();
 
 const storage = multer.diskStorage({
@@ -39,14 +38,6 @@ const upload = multer({
     fileSize: 1024 * 1024 * 3,
   },
   fileFilter: fileFilter,
-});
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.host_email,
-    pass: process.env.host_password,
-  },
 });
 
 router.post("/registration", async (req, res, next) => {
@@ -113,7 +104,7 @@ router.post("/login", async (req, res, next) => {
         return res.status(200).json({
           success: 1,
           message: "Logged in successfully",
-          data: { user_id: user.id, token: "Bearer " + token },
+          data: { token: "Bearer " + token },
         });
       }
       res.status(400).json({
@@ -201,7 +192,7 @@ router.post("/address", validationCheck, async (req, res, next) => {
   }
 });
 
-router.delete("/address", validationCheck, async (req, res) => {
+router.delete("/address", validationCheck, async (req, res, next) => {
   let { address_id } = req.body;
   address_id = address_id.split(",");
   try {
@@ -223,11 +214,11 @@ router.delete("/address", validationCheck, async (req, res) => {
       data: user,
     });
   } catch (err) {
-    throw err;
+    next(err);
   }
 });
 
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", async (req, res, next) => {
   const { username } = req.body;
   try {
     const user = await User.findOne({ username });
@@ -243,6 +234,11 @@ router.post("/forgot-password", async (req, res) => {
     const token = jwt.sign(payload, process.env.mySecretKey, {
       expiresIn: 600,
     });
+    const resetPass = new ResetPassword({
+      username,
+      token,
+    });
+    await resetPass.save();
     const mailOptions = {
       from: process.env.host_email,
       to: user.email_id,
@@ -256,7 +252,7 @@ router.post("/forgot-password", async (req, res) => {
       data: token,
     });
   } catch (err) {
-    throw err;
+    next(err);
   }
 });
 
@@ -266,6 +262,13 @@ router.post(
     const token = req.params.password_reset_token;
     let { password, confirm_password } = req.body;
     try {
+      const verify_token = await ResetPassword.findOne({ token });
+      if (!verify_token)
+        return res.status(400).json({
+          success: 0,
+          message:
+            "This token is already used,please request another valid token",
+        });
       const decoded = jwt.verify(token, process.env.mySecretKey);
       if (password !== confirm_password)
         return res.status(400).json({
@@ -279,6 +282,7 @@ router.post(
         { $set: { password, salt } },
         { new: true }
       ).select("-password -salt");
+      await ResetPassword.findOneAndRemove({ token });
       const mailOptions = {
         from: process.env.host_email,
         to: decoded.email,
@@ -304,17 +308,10 @@ router.post(
   async (req, res) => {
     const profile_img = req.file.path;
     try {
-      // Implementation 1.upload in folder
-      await User.findByIdAndUpdate(
-        req.user_id,
-        { $set: { profile_img } },
-        { new: true }
-      );
-      // Implementation 2.upload in online storage
       const url = await imgur.uploadFile(`./${profile_img}`);
       const user = await User.findByIdAndUpdate(
         req.user_id,
-        { $set: { profile_img_online_storage: url.link } },
+        { $set: { profile_img, profile_img_online_storage: url.link } },
         { new: true }
       ).select("-password -salt");
       res.status(200).json({
@@ -323,7 +320,9 @@ router.post(
         data: user,
       });
     } catch (err) {
-      throw err;
+      res
+        .status(400)
+        .json({ success: 0, message: "Error in uploading profile picture" });
     }
   }
 );
