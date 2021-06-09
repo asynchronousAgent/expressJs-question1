@@ -34,6 +34,12 @@ const userSchema = new mongoose.Schema({
     type: [mongoose.Schema.Types.ObjectId],
     ref: "Address",
   },
+  profile_img: {
+    type: String,
+  },
+  profile_img_online_storage: {
+    type: String,
+  },
 });
 
 const User = mongoose.model("User", userSchema);

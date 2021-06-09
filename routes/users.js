@@ -1,11 +1,44 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const md5 = require("md5");
+const jwt = require("jsonwebtoken");
+const multer = require("multer");
+const imgur = require("imgur");
+require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
 const AccessToken = require("../models/access_token");
 const Address = require("../models/address");
+const transporter = require("../util/mailTransporter");
+const ResetPassword = require("../models/resetPassword");
 const router = express.Router();
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "./uploads/");
+  },
+  filename: function (req, file, cb) {
+    cb(
+      null,
+      new Date().toISOString().replace(/:/g, "-") + "_" + file.originalname
+    );
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype === "image/jpeg" || file.mimetype === "image/png") {
+    cb(null, true);
+  } else {
+    cb(new Error("Invalid mimetype"), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 1024 * 1024 * 3,
+  },
+  fileFilter: fileFilter,
+});
 
 router.post("/registration", async (req, res, next) => {
   const {
@@ -16,6 +49,12 @@ router.post("/registration", async (req, res, next) => {
     password,
     confirm_password,
   } = req.body;
+  const mailOptions = {
+    from: process.env.host_email,
+    to: email_id,
+    subject: "Registration",
+    text: `Hi ${username}, your registration succeeded`,
+  };
   try {
     const user = await User.findOne({ username, email_id });
     if (user)
@@ -38,6 +77,7 @@ router.post("/registration", async (req, res, next) => {
     newUser.password = await bcrypt.hash(password, salt);
     newUser.salt = salt;
     await newUser.save();
+    await transporter.sendMail(mailOptions);
     res.status(201).json({
       success: 1,
       message: `${newUser.username} created successfully`,
@@ -55,41 +95,21 @@ router.post("/login", async (req, res, next) => {
     if (user) {
       const verifiedUser = await bcrypt.compare(password, user.password);
       if (verifiedUser) {
-        let exist_user = await AccessToken.findOne({ user_id: user._id });
-        if (exist_user) {
-          const newToken = md5(Date.now() + user.username);
-          const newExpiry = Date.now() + 1000 * 60 * 60;
-          exist_user = await AccessToken.findOneAndUpdate(
-            { user_id: user._id },
-            {
-              $set: { access_token: newToken, expiry: newExpiry },
-            },
-            { new: true }
-          );
-          return res.status(200).json({
-            success: 1,
-            message: "Logged in successfully",
-            data: { exist_user },
-          });
-        }
-        const token = md5(Date.now() + user.username);
-        const expiry = Date.now() + 1000 * 60 * 60;
-        const access_token = new AccessToken({
-          user_id: user._id,
-          access_token: token,
-          expiry,
+        const payload = {
+          user: user._id,
+        };
+        const token = jwt.sign(payload, process.env.mySecretKey, {
+          expiresIn: 3600,
         });
-        await access_token.save();
         return res.status(200).json({
           success: 1,
           message: "Logged in successfully",
-          data: { access_token },
+          data: { token: "Bearer " + token },
         });
       }
       res.status(400).json({
         success: 0,
         message: "Login credentials didn't match,Please try again",
-        data: { verifiedUser },
       });
     } else {
       res.status(500).json({ success: 0, message: "Internal Server error" });
@@ -171,6 +191,141 @@ router.post("/address", validationCheck, async (req, res, next) => {
     next(err);
   }
 });
+
+router.delete("/address", validationCheck, async (req, res, next) => {
+  let { address_id } = req.body;
+  address_id = address_id.split(",");
+  try {
+    const address = await Address.deleteMany({ _id: { $in: address_id } });
+    if (!address)
+      return res.status(404).json({
+        success: 0,
+        message:
+          "provided address_id is not valid, please provide a valid address_id",
+      });
+    const user = await User.findByIdAndUpdate(
+      req.user_id,
+      { $pull: { address: { $in: address_id } } },
+      { new: true }
+    );
+    res.status(200).json({
+      success: 1,
+      message: "requested address has been deleted successfully",
+      data: user,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/forgot-password", async (req, res, next) => {
+  const { username } = req.body;
+  try {
+    const user = await User.findOne({ username });
+    if (!user)
+      return res.status(400).json({
+        success: 0,
+        message: "Please give proper username",
+      });
+    const payload = {
+      user: username,
+      email: user.email_id,
+    };
+    const token = jwt.sign(payload, process.env.mySecretKey, {
+      expiresIn: 600,
+    });
+    const resetPass = new ResetPassword({
+      username,
+      token,
+    });
+    await resetPass.save();
+    const mailOptions = {
+      from: process.env.host_email,
+      to: user.email_id,
+      subject: "Reset password",
+      text: `Hi ${username}, your request to reset password has been processed. Please open the following link to reset your password, please noted this link is valid only for 10 minutes. Link-> ${process.env.reset_link}/${token}`,
+    };
+    await transporter.sendMail(mailOptions);
+    res.status(200).json({
+      success: 1,
+      message: "Token for reset password has been generated successfully",
+      data: token,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post(
+  "/verify-reset-password/:password_reset_token",
+  async (req, res) => {
+    const token = req.params.password_reset_token;
+    let { password, confirm_password } = req.body;
+    try {
+      const verify_token = await ResetPassword.findOne({ token });
+      if (!verify_token)
+        return res.status(400).json({
+          success: 0,
+          message:
+            "This token is already used,please request another valid token",
+        });
+      const decoded = jwt.verify(token, process.env.mySecretKey);
+      if (password !== confirm_password)
+        return res.status(400).json({
+          success: 0,
+          message: "password did not match, please re-enter correctly",
+        });
+      const salt = await bcrypt.genSalt(10);
+      password = await bcrypt.hash(password, salt);
+      const reset_successful = await User.findOneAndUpdate(
+        { username: decoded.user },
+        { $set: { password, salt } },
+        { new: true }
+      ).select("-password -salt");
+      await ResetPassword.findOneAndRemove({ token });
+      const mailOptions = {
+        from: process.env.host_email,
+        to: decoded.email,
+        subject: "Password Changed",
+        text: `Hi ${decoded.user}, your Password has been Changed successfully`,
+      };
+      await transporter.sendMail(mailOptions);
+      res.status(200).json({
+        success: 1,
+        message: "Password changed successfully",
+        data: reset_successful,
+      });
+    } catch (err) {
+      res.status(400).json({ success: 0, message: "Token expired" });
+    }
+  }
+);
+
+router.post(
+  "/profile-image",
+  validationCheck,
+  upload.single("profile_img"),
+  async (req, res) => {
+    const profile_img = req.file.path;
+    try {
+      const url = await imgur.uploadFile(`./${profile_img}`);
+      const user = await User.findByIdAndUpdate(
+        req.user_id,
+        { $set: { profile_img, profile_img_online_storage: url.link } },
+        { new: true }
+      ).select("-password -salt");
+      res.status(200).json({
+        success: 1,
+        message: "Profile photo updated successfully",
+        data: user,
+      });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ success: 0, message: "Error in uploading profile picture" });
+    }
+  }
+);
 
 router.get("/get/:userid", async (req, res, next) => {
   try {

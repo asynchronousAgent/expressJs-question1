@@ -3,6 +3,7 @@ const bodyParser = require("body-parser");
 const users = require("./routes/users");
 
 const app = express();
+app.use("/uploads", express.static("uploads"));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
