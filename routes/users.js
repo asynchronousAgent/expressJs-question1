@@ -9,7 +9,6 @@ const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
 const AccessToken = require("../models/access_token");
 const Address = require("../models/address");
-const transporter = require("../util/mailTransporter");
 const ResetPassword = require("../models/resetPassword");
 const router = express.Router();
 
