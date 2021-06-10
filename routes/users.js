@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const imgur = require("imgur");
+const sgmail = require("@sendgrid/mail");
 require("dotenv").config();
 const User = require("../models/user");
 const validationCheck = require("../middleware/validationCheck");
@@ -11,6 +12,8 @@ const Address = require("../models/address");
 const transporter = require("../util/mailTransporter");
 const ResetPassword = require("../models/resetPassword");
 const router = express.Router();
+
+sgmail.setApiKey(process.env.sendgrid_api);
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -49,12 +52,14 @@ router.post("/registration", async (req, res, next) => {
     password,
     confirm_password,
   } = req.body;
-  const mailOptions = {
-    from: process.env.host_email,
+
+  const msg = {
     to: email_id,
-    subject: "Registration",
-    text: `Hi ${username}, your registration succeeded`,
+    from: process.env.host_email,
+    subject: "Registration Successful",
+    html: "<strong>you have successfully registered here</strong>",
   };
+
   try {
     const user = await User.findOne({ username, email_id });
     if (user)
@@ -77,7 +82,8 @@ router.post("/registration", async (req, res, next) => {
     newUser.password = await bcrypt.hash(password, salt);
     newUser.salt = salt;
     await newUser.save();
-    await transporter.sendMail(mailOptions);
+
+    await sgmail.send(msg);
     res.status(201).json({
       success: 1,
       message: `${newUser.username} created successfully`,
@@ -239,13 +245,13 @@ router.post("/forgot-password", async (req, res, next) => {
       token,
     });
     await resetPass.save();
-    const mailOptions = {
-      from: process.env.host_email,
+    const msg = {
       to: user.email_id,
+      from: process.env.host_email,
       subject: "Reset password",
-      text: `Hi ${username}, your request to reset password has been processed. Please open the following link to reset your password, please noted this link is valid only for 10 minutes. Link-> ${process.env.reset_link}/${token}`,
+      html: `<strong>Hi ${username}, your request to reset password has been processed. Please open the following link to reset your password, please noted this link is valid only for 10 minutes. Link-> ${process.env.reset_link}/${token}</strong>`,
     };
-    await transporter.sendMail(mailOptions);
+    await sgmail.send(msg);
     res.status(200).json({
       success: 1,
       message: "Token for reset password has been generated successfully",
@@ -283,13 +289,13 @@ router.post(
         { new: true }
       ).select("-password -salt");
       await ResetPassword.findOneAndRemove({ token });
-      const mailOptions = {
+      const msg = {
         from: process.env.host_email,
         to: decoded.email,
         subject: "Password Changed",
-        text: `Hi ${decoded.user}, your Password has been Changed successfully`,
+        html: `Hi ${decoded.user}, your Password has been Changed successfully`,
       };
-      await transporter.sendMail(mailOptions);
+      await sgmail.send(msg);
       res.status(200).json({
         success: 1,
         message: "Password changed successfully",
