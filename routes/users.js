@@ -325,7 +325,6 @@ router.post(
         data: user,
       });
     } catch (err) {
-      console.log(err);
       res
         .status(400)
         .json({ success: 0, message: "Error in uploading profile picture" });
