@@ -16,7 +16,6 @@ app.use((req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
-  console.log(err);
   res.status(err.status || 400).json({ success: 0, message: err.message });
 });
 
